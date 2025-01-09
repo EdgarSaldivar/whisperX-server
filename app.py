@@ -1,6 +1,7 @@
 import os
 import datetime
 import json
+import time
 from flask import Flask, request, jsonify
 import whisperx
 from werkzeug.utils import secure_filename
@@ -17,17 +18,31 @@ torch.backends.cudnn.allow_tf32 = True
 qdrant = QdrantClient(os.getenv('QDRANT_URL', 'http://localhost:6333'))
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Create Qdrant collection if it doesn't exist
-try:
-    qdrant.get_collection('transcriptions')
-except ValueError:
-    qdrant.create_collection(
-        collection_name='transcriptions',
-        vectors_config={
-            'size': 384,  # all-MiniLM-L6-v2 embedding size
-            'distance': 'Cosine'
-        }
-    )
+# Initialize Qdrant collection with retries
+max_retries = 5
+retry_delay = 2  # seconds
+
+for attempt in range(max_retries):
+    try:
+        # Check if collection exists
+        try:
+            qdrant.get_collection('transcriptions')
+        except Exception:
+            # Create collection if it doesn't exist
+            qdrant.create_collection(
+                collection_name='transcriptions',
+                vectors_config={
+                    'size': 384,  # all-MiniLM-L6-v2 embedding size
+                    'distance': 'Cosine'
+                }
+            )
+        break
+    except Exception as e:
+        if attempt == max_retries - 1:
+            app.logger.error(f"Failed to initialize Qdrant collection after {max_retries} attempts: {str(e)}")
+            raise
+        app.logger.warning(f"Qdrant initialization attempt {attempt + 1} failed, retrying in {retry_delay} seconds...")
+        time.sleep(retry_delay)
 
 app = Flask(__name__)
 
