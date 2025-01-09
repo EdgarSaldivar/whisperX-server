@@ -11,7 +11,8 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - TF_FORCE_GPU_ALLOW_GROWTH=true
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_REQUIRE_CUDA=cuda>=12.2
       - CUDA_VISIBLE_DEVICES=GPU-b5864669-d804-c2f5-e94b-60885d9012af
     runtime: nvidia
     restart: unless-stopped
