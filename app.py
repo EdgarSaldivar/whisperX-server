@@ -134,10 +134,24 @@ def transcribe() -> Dict[str, Any]:
                 })
                 
                 # Convert diarization results to list of (start, end, speaker) tuples
-                diarize_segments = [
-                    (segment.start, segment.end, segment.speaker)
-                    for segment in diarize_segments.itertracks(yield_label=True)
-                ]
+                try:
+                    app.logger.info("Diarization pipeline output type: %s", type(diarize_segments))
+                    if hasattr(diarize_segments, 'itertracks'):
+                        diarize_segments = [
+                            (segment.start, segment.end, segment.speaker)
+                            for segment in diarize_segments.itertracks(yield_label=True)
+                        ]
+                    elif hasattr(diarize_segments, 'for_json'):
+                        # Handle newer pyannote.audio format
+                        diarize_segments = [
+                            (segment['start'], segment['end'], segment['speaker'])
+                            for segment in diarize_segments.for_json()['content']
+                        ]
+                    else:
+                        raise ValueError("Unsupported diarization format")
+                except Exception as e:
+                    app.logger.error("Diarization format conversion failed: %s", str(e))
+                    raise
             except Exception as e:
                 app.logger.error(f"Diarization failed: {str(e)}")
                 diarize_segments = result['segments']
