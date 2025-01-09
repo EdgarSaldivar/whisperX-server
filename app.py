@@ -12,7 +12,7 @@ ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 # Load model at startup
-model = whisperx.load_model(MODEL_NAME)
+model = whisperx.load_model(MODEL_NAME, device='cuda')
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and \

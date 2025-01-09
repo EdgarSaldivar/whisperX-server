@@ -10,3 +10,4 @@ Flask
 gunicorn
 python-dotenv
 filetype
+pyannote.audio
