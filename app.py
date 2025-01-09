@@ -6,10 +6,28 @@ import whisperx
 from werkzeug.utils import secure_filename
 from typing import Dict, Any
 import torch
+from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
 
 # Enable TF32 for better performance
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+
+# Initialize Qdrant client
+qdrant = QdrantClient(os.getenv('QDRANT_URL', 'http://localhost:6333'))
+embedder = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Create Qdrant collection if it doesn't exist
+try:
+    qdrant.get_collection('transcriptions')
+except ValueError:
+    qdrant.create_collection(
+        collection_name='transcriptions',
+        vectors_config={
+            'size': 384,  # all-MiniLM-L6-v2 embedding size
+            'distance': 'Cosine'
+        }
+    )
 
 app = Flask(__name__)
 
@@ -62,24 +80,42 @@ def transcribe() -> Dict[str, Any]:
         # Transcribe audio
         result = model.transcribe(temp_path)
         
-        # Handle WhisperX response format
+        # Handle WhisperX response format with diarization
         if isinstance(result, dict) and 'segments' in result:
-            text = ' '.join(segment['text'].strip() for segment in result['segments'])
+            # Perform diarization
+            diarize_model = whisperx.DiarizationPipeline(device=device)
+            diarize_segments = diarize_model(result['segments'])
+            
+            # Combine text with speaker information
+            text = ' '.join(f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
+                          for segment in diarize_segments)
+            
             response = {
                 'transcription': text,
                 'language': result.get('language', 'en'),
-                'segments': result['segments']
+                'segments': diarize_segments
             }
             
-            # Save transcription to volume
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{os.getenv('TRANSCRIPTION_DIR', '/transcriptions')}/{timestamp}_{secure_filename(file.filename)}.json"
-            try:
-                with open(filename, 'w') as f:
-                    json.dump(response, f)
-                app.logger.info(f"Successfully saved transcription to {filename}")
-            except Exception as e:
-                app.logger.error(f"Failed to save transcription: {str(e)}")
+            # Generate embedding for the full transcription
+            embedding = embedder.encode(text)
+            
+            # Store in Qdrant
+            qdrant.upsert(
+                collection_name='transcriptions',
+                points=[
+                    {
+                        'id': int(datetime.datetime.now().timestamp() * 1000),
+                        'vector': embedding.tolist(),
+                        'payload': {
+                            'text': text,
+                            'language': response['language'],
+                            'segments': response['segments'],
+                            'filename': secure_filename(file.filename),
+                            'timestamp': datetime.datetime.now().isoformat()
+                        }
+                    }
+                ]
+            )
             
             # Clean up
             os.remove(temp_path)
