@@ -11,8 +11,18 @@ MODEL_NAME = os.getenv('WHISPER_MODEL', 'large-v2')
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
+# Verify GPU availability
+import torch
+if torch.cuda.is_available():
+    app.logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    app.logger.info(f"CUDA version: {torch.version.cuda}")
+    device = 'cuda'
+else:
+    app.logger.warning("No GPU available, falling back to CPU")
+    device = 'cpu'
+
 # Load model at startup
-model = whisperx.load_model(MODEL_NAME, device='cuda')
+model = whisperx.load_model(MODEL_NAME, device=device)
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and \
@@ -57,8 +67,12 @@ def transcribe() -> Dict[str, Any]:
             # Save transcription to volume
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{os.getenv('TRANSCRIPTION_DIR', '/transcriptions')}/{timestamp}_{secure_filename(file.filename)}.json"
-            with open(filename, 'w') as f:
-                json.dump(response, f)
+            try:
+                with open(filename, 'w') as f:
+                    json.dump(response, f)
+                app.logger.info(f"Successfully saved transcription to {filename}")
+            except Exception as e:
+                app.logger.error(f"Failed to save transcription: {str(e)}")
             
             # Clean up
             os.remove(temp_path)
