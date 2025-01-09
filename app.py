@@ -104,11 +104,26 @@ def transcribe() -> Dict[str, Any]:
             # Perform diarization with authentication
             try:
                 from huggingface_hub import login
-                login(token=os.getenv('HF_TOKEN'))
+                # Try to get HF_TOKEN from .env.local first, then fallback to .env
+                hf_token = None
+                try:
+                    from dotenv import load_dotenv
+                    load_dotenv('.env.local')
+                    hf_token = os.getenv('HF_TOKEN')
+                except:
+                    pass
+                
+                if not hf_token:
+                    hf_token = os.getenv('HF_TOKEN')
+                
+                if not hf_token:
+                    raise ValueError("HF_TOKEN not found in .env or .env.local")
+                
+                login(token=hf_token)
                 from pyannote.audio import Pipeline
                 diarize_pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1",
-                    use_auth_token=os.getenv('HF_TOKEN')
+                    use_auth_token=hf_token
                 )
                 # Get audio data for diarization
                 import librosa
