@@ -45,18 +45,28 @@ def transcribe() -> Dict[str, Any]:
         # Transcribe audio
         result = model.transcribe(temp_path)
         
-        # Clean up
-        os.remove(temp_path)
-        
         # Handle WhisperX response format
         if isinstance(result, dict) and 'segments' in result:
             text = ' '.join(segment['text'].strip() for segment in result['segments'])
-            return jsonify({
+            response = {
                 'transcription': text,
                 'language': result.get('language', 'en'),
                 'segments': result['segments']
-            })
+            }
+            
+            # Save transcription to volume
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{os.getenv('TRANSCRIPTION_DIR', '/transcriptions')}/{timestamp}_{secure_filename(file.filename)}.json"
+            with open(filename, 'w') as f:
+                json.dump(response, f)
+            
+            # Clean up
+            os.remove(temp_path)
+            
+            return jsonify(response)
         else:
+            # Clean up
+            os.remove(temp_path)
             return jsonify({'error': 'Invalid transcription result format'}), 500
         
     except Exception as e:

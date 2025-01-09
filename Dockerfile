@@ -19,11 +19,15 @@ RUN python3 -m pip install --no-cache-dir -r requirements.txt
 # Install gunicorn for production
 RUN python3 -m pip install gunicorn python-dotenv
 
+# Create transcription storage directory
+RUN mkdir -p /transcriptions
+
 # Copy the rest of the application
 COPY . .
 
 # Environment variables
 ENV FLASK_ENV=production
+ENV TRANSCRIPTION_DIR=/transcriptions
 ENV WHISPER_MODEL=large-v2
 
 # Expose the application port
