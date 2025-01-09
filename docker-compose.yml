@@ -23,7 +23,9 @@ services:
       resources:
         reservations:
           devices:
-            - capabilities: [gpu]
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
 
   qdrant:
     container_name: qdrant
