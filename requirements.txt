@@ -15,4 +15,5 @@ huggingface-hub>=0.16.4
 qdrant-client==1.12.2
 sentence-transformers==2.2.2
 huggingface-hub==0.16.4
+librosa==0.10.1
 numpy<2.0.0

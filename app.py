@@ -110,9 +110,12 @@ def transcribe() -> Dict[str, Any]:
                     "pyannote/speaker-diarization-3.1",
                     use_auth_token=os.getenv('HF_TOKEN')
                 )
+                # Get audio data for diarization
+                import librosa
+                audio, sr = librosa.load(temp_path, sr=None)
                 diarize_segments = diarize_pipeline({
-                    "waveform": torch.from_numpy(result['audio']),
-                    "sample_rate": result['sample_rate']
+                    "waveform": torch.from_numpy(audio).unsqueeze(0),
+                    "sample_rate": sr
                 })
             except Exception as e:
                 app.logger.error(f"Diarization failed: {str(e)}")
@@ -123,12 +126,21 @@ def transcribe() -> Dict[str, Any]:
             # Combine text with speaker information
             text = ' '.join(f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
                           for segment in result['segments'])
+            
             # Align diarization results with transcription segments
             for segment in result['segments']:
-                segment['speaker'] = diarize_segments.crop(
-                    segment['start'],
-                    segment['end']
-                ).argmax()
+                # Find overlapping speakers
+                speakers = []
+                for turn, _, speaker in diarize_segments.itertracks(yield_label=True):
+                    if turn.start <= segment['end'] and turn.end >= segment['start']:
+                        speakers.append(speaker)
+                
+                # Assign most common speaker
+                if speakers:
+                    from collections import Counter
+                    segment['speaker'] = Counter(speakers).most_common(1)[0][0]
+                else:
+                    segment['speaker'] = 'SPEAKER_00'
             
             response = {
                 'transcription': text,
