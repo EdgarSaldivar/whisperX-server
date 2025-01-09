@@ -1,8 +1,15 @@
 import os
+import datetime
+import json
 from flask import Flask, request, jsonify
 import whisperx
 from werkzeug.utils import secure_filename
 from typing import Dict, Any
+import torch
+
+# Enable TF32 for better performance
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 app = Flask(__name__)
 
