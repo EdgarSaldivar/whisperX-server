@@ -97,9 +97,14 @@ def transcribe() -> Dict[str, Any]:
         
         # Handle WhisperX response format with diarization
         if isinstance(result, dict) and 'segments' in result:
-            # Perform diarization with proper device handling
+            # Perform diarization with authentication
             try:
-                diarize_model = whisperx.DiarizationPipeline(device=device if torch.cuda.is_available() else 'cpu')
+                from huggingface_hub import login
+                login(token=os.getenv('HF_TOKEN'))
+                diarize_model = whisperx.DiarizationPipeline(
+                    device=device if torch.cuda.is_available() else 'cpu',
+                    use_auth_token=os.getenv('HF_TOKEN')
+                )
                 diarize_segments = diarize_model(result['segments'])
             except Exception as e:
                 app.logger.error(f"Diarization failed: {str(e)}")

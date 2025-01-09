@@ -10,7 +10,8 @@ Flask
 gunicorn
 python-dotenv
 filetype
-pyannote.audio
+pyannote.audio==3.1.1
+huggingface-hub>=0.16.4
 qdrant-client==1.12.2
 sentence-transformers==2.2.2
 huggingface-hub==0.16.4
