@@ -6,3 +6,7 @@ transformers
 pandas
 setuptools>=65
 nltk
+Flask
+gunicorn
+python-dotenv
+filetype
