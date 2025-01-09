@@ -11,5 +11,5 @@ gunicorn
 python-dotenv
 filetype
 pyannote.audio
-qdrant-client==1.6.2
+qdrant-client==1.12.6
 sentence-transformers==2.2.2
