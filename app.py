@@ -163,19 +163,18 @@ def transcribe() -> Dict[str, Any]:
                 # Convert diarization results to list of (start, end, speaker) tuples
                 try:
                     app.logger.info("Diarization pipeline output type: %s", type(diarize_segments))
-                    if hasattr(diarize_segments, 'itertracks'):
-                        diarize_segments = [
-                            (segment.start, segment.end, segment.speaker)
-                            for segment in diarize_segments.itertracks(yield_label=True)
-                        ]
-                    elif hasattr(diarize_segments, 'for_json'):
+                    if hasattr(diarize_segments, 'for_json'):
                         # Handle newer pyannote.audio format
                         diarize_segments = [
                             (segment['start'], segment['end'], segment['speaker'])
                             for segment in diarize_segments.for_json()['content']
                         ]
                     else:
-                        raise ValueError("Unsupported diarization format")
+                        # Fallback to direct iteration if for_json not available
+                        diarize_segments = [
+                            (segment.start, segment.end, segment.speaker)
+                            for segment in diarize_segments
+                        ]
                 except Exception as e:
                     app.logger.error("Diarization format conversion failed: %s", str(e))
                     raise
@@ -193,8 +192,8 @@ def transcribe() -> Dict[str, Any]:
             for segment in result['segments']:
                 # Find overlapping speakers
                 speakers = []
-                for turn, _, speaker in diarize_segments.itertracks(yield_label=True):
-                    if turn.start <= segment['end'] and turn.end >= segment['start']:
+                for turn_start, turn_end, speaker in diarize_segments:
+                    if turn_start <= segment['end'] and turn_end >= segment['start']:
                         speakers.append(speaker)
                 
                 # Assign most common speaker
