@@ -1,5 +1,5 @@
-torch>=2
-torchaudio>=2
+torch==1.10.0+cu102
+torchaudio==0.10.0+cu102
 faster-whisper==1.1.0
 ctranslate2<4.5.0
 transformers
