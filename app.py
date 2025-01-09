@@ -121,10 +121,20 @@ def transcribe() -> Dict[str, Any]:
                 
                 login(token=hf_token)
                 from pyannote.audio import Pipeline
-                diarize_pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-3.1",
-                    use_auth_token=hf_token
-                )
+                try:
+                    app.logger.info("Initializing diarization pipeline...")
+                    diarize_pipeline = Pipeline.from_pretrained(
+                        "pyannote/speaker-diarization-3.1",
+                        use_auth_token=hf_token
+                    )
+                    
+                    if diarize_pipeline is None:
+                        raise ValueError("Failed to initialize diarization pipeline")
+                        
+                    app.logger.info("Pipeline initialized successfully: %s", type(diarize_pipeline))
+                except Exception as e:
+                    app.logger.error("Pipeline initialization failed: %s", str(e))
+                    raise
                 # Get audio data for diarization
                 import librosa
                 audio, sr = librosa.load(temp_path, sr=None)
