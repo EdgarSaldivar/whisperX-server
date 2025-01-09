@@ -117,6 +117,12 @@ def transcribe() -> Dict[str, Any]:
                     "waveform": torch.from_numpy(audio).unsqueeze(0),
                     "sample_rate": sr
                 })
+                
+                # Convert diarization results to list of (start, end, speaker) tuples
+                diarize_segments = [
+                    (segment.start, segment.end, segment.speaker)
+                    for segment in diarize_segments.itertracks(yield_label=True)
+                ]
             except Exception as e:
                 app.logger.error(f"Diarization failed: {str(e)}")
                 diarize_segments = result['segments']
