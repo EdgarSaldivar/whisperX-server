@@ -97,9 +97,15 @@ def transcribe() -> Dict[str, Any]:
         
         # Handle WhisperX response format with diarization
         if isinstance(result, dict) and 'segments' in result:
-            # Perform diarization
-            diarize_model = whisperx.DiarizationPipeline(device=device)
-            diarize_segments = diarize_model(result['segments'])
+            # Perform diarization with proper device handling
+            try:
+                diarize_model = whisperx.DiarizationPipeline(device=device if torch.cuda.is_available() else 'cpu')
+                diarize_segments = diarize_model(result['segments'])
+            except Exception as e:
+                app.logger.error(f"Diarization failed: {str(e)}")
+                diarize_segments = result['segments']
+                for segment in diarize_segments:
+                    segment['speaker'] = 'SPEAKER_00'
             
             # Combine text with speaker information
             text = ' '.join(f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
