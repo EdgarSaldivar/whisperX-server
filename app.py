@@ -163,18 +163,39 @@ def transcribe() -> Dict[str, Any]:
                 # Convert diarization results to list of (start, end, speaker) tuples
                 try:
                     app.logger.info("Diarization pipeline output type: %s", type(diarize_segments))
+                    app.logger.info("Diarization pipeline output sample: %s", str(diarize_segments)[:200])  # Log first 200 chars
+                    
                     if hasattr(diarize_segments, 'for_json'):
                         # Handle newer pyannote.audio format
+                        json_data = diarize_segments.for_json()
+                        app.logger.info("Diarization JSON structure: %s", str(json_data)[:200])
                         diarize_segments = [
                             (segment['start'], segment['end'], segment['speaker'])
-                            for segment in diarize_segments.for_json()['content']
+                            for segment in json_data['content']
+                        ]
+                    elif isinstance(diarize_segments, dict):
+                        # Handle dictionary format
+                        diarize_segments = [
+                            (segment['start'], segment['end'], segment['speaker'])
+                            for segment in diarize_segments.get('content', [])
                         ]
                     else:
-                        # Fallback to direct iteration if for_json not available
-                        diarize_segments = [
-                            (segment.start, segment.end, segment.speaker)
-                            for segment in diarize_segments
-                        ]
+                        # Fallback to direct iteration if format is unknown
+                        diarize_segments = list(diarize_segments)
+                        app.logger.info("Raw diarization segments: %s", str(diarize_segments)[:200])
+                        
+                        # Try to extract start, end, speaker from whatever format we have
+                        try:
+                            diarize_segments = [
+                                (getattr(seg, 'start', None) or seg[0],
+                                 getattr(seg, 'end', None) or seg[1],
+                                 getattr(seg, 'speaker', None) or seg[2])
+                                for seg in diarize_segments
+                            ]
+                        except Exception as e:
+                            app.logger.error("Failed to parse diarization segments: %s", str(e))
+                            raise ValueError("Unsupported diarization format")
+                            
                 except Exception as e:
                     app.logger.error("Diarization format conversion failed: %s", str(e))
                     raise
@@ -192,9 +213,17 @@ def transcribe() -> Dict[str, Any]:
             for segment in result['segments']:
                 # Find overlapping speakers
                 speakers = []
-                for turn_start, turn_end, speaker in diarize_segments:
-                    if turn_start <= segment['end'] and turn_end >= segment['start']:
-                        speakers.append(speaker)
+                for turn in diarize_segments:
+                    try:
+                        turn_start = turn[0] if isinstance(turn, (list, tuple)) else turn['start']
+                        turn_end = turn[1] if isinstance(turn, (list, tuple)) else turn['end']
+                        speaker = turn[2] if isinstance(turn, (list, tuple)) else turn['speaker']
+                        
+                        if turn_start <= segment['end'] and turn_end >= segment['start']:
+                            speakers.append(speaker)
+                    except Exception as e:
+                        app.logger.warning(f"Failed to process diarization turn: {str(e)}")
+                        continue
                 
                 # Assign most common speaker
                 if speakers:
