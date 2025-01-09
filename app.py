@@ -48,11 +48,16 @@ def transcribe() -> Dict[str, Any]:
         # Clean up
         os.remove(temp_path)
         
-        return jsonify({
-            'transcription': result['text'],
-            'language': result['language'],
-            'segments': result['segments']
-        })
+        # Handle WhisperX response format
+        if isinstance(result, dict) and 'segments' in result:
+            text = ' '.join(segment['text'].strip() for segment in result['segments'])
+            return jsonify({
+                'transcription': text,
+                'language': result.get('language', 'en'),
+                'segments': result['segments']
+            })
+        else:
+            return jsonify({'error': 'Invalid transcription result format'}), 500
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
