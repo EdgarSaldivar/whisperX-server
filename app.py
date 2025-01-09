@@ -10,9 +10,13 @@ import torch
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
-# Enable TF32 for better performance
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+# Configure TF32 and suppress warnings
+import warnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
 
 # Initialize Qdrant client
 qdrant = QdrantClient(os.getenv('QDRANT_URL', 'http://localhost:6333'))
@@ -101,11 +105,15 @@ def transcribe() -> Dict[str, Any]:
             try:
                 from huggingface_hub import login
                 login(token=os.getenv('HF_TOKEN'))
-                diarize_model = whisperx.DiarizationPipeline(
-                    device=device if torch.cuda.is_available() else 'cpu',
+                from pyannote.audio import Pipeline
+                diarize_pipeline = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
                     use_auth_token=os.getenv('HF_TOKEN')
                 )
-                diarize_segments = diarize_model(result['segments'])
+                diarize_segments = diarize_pipeline({
+                    "waveform": torch.from_numpy(result['audio']),
+                    "sample_rate": result['sample_rate']
+                })
             except Exception as e:
                 app.logger.error(f"Diarization failed: {str(e)}")
                 diarize_segments = result['segments']
@@ -114,7 +122,13 @@ def transcribe() -> Dict[str, Any]:
             
             # Combine text with speaker information
             text = ' '.join(f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
-                          for segment in diarize_segments)
+                          for segment in result['segments'])
+            # Align diarization results with transcription segments
+            for segment in result['segments']:
+                segment['speaker'] = diarize_segments.crop(
+                    segment['start'],
+                    segment['end']
+                ).argmax()
             
             response = {
                 'transcription': text,

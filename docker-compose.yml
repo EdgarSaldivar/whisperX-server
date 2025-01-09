@@ -6,6 +6,8 @@ services:
       - "2990:2990"
     volumes:
       - ./transcriptions:/transcriptions
+      - whisperx-models:/root/.cache/whisperx
+      - hf-models:/root/.cache/huggingface
     env_file:
       - .env.local
     environment:
