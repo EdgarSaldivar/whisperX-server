@@ -123,17 +123,34 @@ def transcribe() -> Dict[str, Any]:
                 from pyannote.audio import Pipeline
                 try:
                     app.logger.info("Initializing diarization pipeline...")
-                    diarize_pipeline = Pipeline.from_pretrained(
-                        "pyannote/speaker-diarization-3.1",
-                        use_auth_token=hf_token
-                    )
+                    app.logger.info("Using HF_TOKEN: %s", "****" + hf_token[-4:] if hf_token else "None")
+                    
+                    # Check if model is cached locally
+                    from huggingface_hub import snapshot_download
+                    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+                    model_path = os.path.join(cache_dir, "models--pyannote--speaker-diarization-3.1")
+                    
+                    if os.path.exists(model_path):
+                        app.logger.info("Using cached model at: %s", model_path)
+                        diarize_pipeline = Pipeline.from_pretrained(
+                            model_path,
+                            use_auth_token=hf_token
+                        )
+                    else:
+                        app.logger.info("Downloading model from Hugging Face Hub...")
+                        diarize_pipeline = Pipeline.from_pretrained(
+                            "pyannote/speaker-diarization-3.1",
+                            use_auth_token=hf_token
+                        )
                     
                     if diarize_pipeline is None:
                         raise ValueError("Failed to initialize diarization pipeline")
                         
                     app.logger.info("Pipeline initialized successfully: %s", type(diarize_pipeline))
+                    app.logger.info("Pipeline device: %s", diarize_pipeline.device)
                 except Exception as e:
                     app.logger.error("Pipeline initialization failed: %s", str(e))
+                    app.logger.error("Please verify your HF_TOKEN and ensure you have accepted the model license at: https://huggingface.co/pyannote/speaker-diarization-3.1")
                     raise
                 # Get audio data for diarization
                 import librosa
