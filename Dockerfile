@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
 
 # Set GPU capabilities for RTX 4090
 ENV TORCH_CUDA_ARCH_LIST="8.9"
