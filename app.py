@@ -128,7 +128,7 @@ def transcribe() -> Dict[str, Any]:
                     # Check if model is cached locally
                     from huggingface_hub import snapshot_download
                     cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-                    model_path = os.path.join(cache_dir, "models--pyannote--speaker-diarization-3.1")
+                    model_path = os.path.join(cache_dir, "models--pyannote--speaker-diarization-3.1.1")
                     
                     if os.path.exists(model_path):
                         app.logger.info("Using cached model at: %s", model_path)
@@ -139,7 +139,7 @@ def transcribe() -> Dict[str, Any]:
                     else:
                         app.logger.info("Downloading model from Hugging Face Hub...")
                         diarize_pipeline = Pipeline.from_pretrained(
-                            "pyannote/speaker-diarization-3.1",
+                            "pyannote/speaker-diarization-3.1.1",
                             use_auth_token=hf_token
                         )
                     
