@@ -53,3 +53,5 @@ services:
 volumes:
   qdrant_data:
   ollama_data:
+  whisperx-models:
+  hf-models:
