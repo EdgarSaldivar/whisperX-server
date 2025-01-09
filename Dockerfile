@@ -25,10 +25,9 @@ COPY . .
 # Environment variables
 ENV FLASK_ENV=production
 ENV WHISPER_MODEL=large-v2
-ENV PORT=2990
 
 # Expose the application port
-EXPOSE $PORT
+EXPOSE 2990
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:2990", "app:app"]
