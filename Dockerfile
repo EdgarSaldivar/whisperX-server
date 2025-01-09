@@ -19,8 +19,6 @@ RUN python3 -m pip install --no-cache-dir -r requirements.txt
 # Install gunicorn for production
 RUN python3 -m pip install gunicorn python-dotenv
 
-# Upgrade model checkpoint
-RUN python3 -m pytorch_lightning.utilities.upgrade_checkpoint whisperx/assets/pytorch_model.bin
 
 # Create transcription storage directory
 RUN mkdir -p /transcriptions
