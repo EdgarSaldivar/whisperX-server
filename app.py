@@ -140,7 +140,7 @@ def transcribe() -> Dict[str, Any]:
                         app.logger.info("Downloading model from Hugging Face Hub...")
                         diarize_pipeline = Pipeline.from_pretrained(
                             "pyannote/speaker-diarization-3.1.1",
-                            use_auth_token=hf_token
+                            hf_token
                         )
                     
                     if diarize_pipeline is None:
