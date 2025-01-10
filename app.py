@@ -227,32 +227,32 @@ def transcribe() -> Dict[str, Any]:
             'segments': result['segments']
         }
 
-            # Store in Qdrant
-            try:
-                embedding = embedder.encode(text)
-                qdrant.upsert(
-                    collection_name='transcriptions',
-                    points=[{
-                        'id': int(datetime.datetime.now().timestamp() * 1000),
-                        'vector': embedding.tolist(),
-                        'payload': {
-                            'text': text,
-                            'language': response['language'],
-                            'segments': processed_segments,
-                            'filename': filename,
-                            'timestamp': datetime.datetime.now().isoformat()
-                        }
-                    }]
-                )
-                app.logger.info("Successfully stored in Qdrant")
-            except Exception as e:
-                app.logger.error(f"Qdrant storage failed: {str(e)}")
-                # Continue without failing the request
+        # Store in Qdrant
+        try:
+            embedding = embedder.encode(text)
+            qdrant.upsert(
+                collection_name='transcriptions',
+                points=[{
+                    'id': int(datetime.datetime.now().timestamp() * 1000),
+                    'vector': embedding.tolist(),
+                    'payload': {
+                        'text': text,
+                        'language': response['language'],
+                        'segments': processed_segments,
+                        'filename': filename,
+                        'timestamp': datetime.datetime.now().isoformat()
+                    }
+                }]
+            )
+            app.logger.info("Successfully stored in Qdrant")
+        except Exception as e:
+            app.logger.error(f"Qdrant storage failed: {str(e)}")
+            # Continue without failing the request
 
-            # Clean up
-            os.remove(temp_path)
-            
-            return jsonify(response)
+        # Clean up
+        os.remove(temp_path)
+        
+        return jsonify(response)
 
         except Exception as e:
             app.logger.error(f"Error processing segments: {str(e)}")
