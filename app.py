@@ -140,8 +140,7 @@ def transcribe() -> Dict[str, Any]:
                 diarize_segments = diarize_model(
                     temp_path,
                     min_speakers=min_speakers,
-                    max_speakers=max_speakers,
-                    threshold=0.5  # Lower threshold for better detection
+                    max_speakers=max_speakers
                 )
                 
                 # Assign speakers with detailed logging
