@@ -254,9 +254,9 @@ def transcribe() -> Dict[str, Any]:
         
         return jsonify(response)
 
-        except Exception as e:
-            app.logger.error(f"Error processing segments: {str(e)}")
-            return jsonify({'error': f'Failed to process segments: {str(e)}'}), 500
+    except Exception as e:
+        app.logger.error(f"Error processing segments: {str(e)}")
+        return jsonify({'error': f'Failed to process segments: {str(e)}'}), 500
 
     except Exception as e:
         app.logger.error(f"Unexpected error: {str(e)}")
