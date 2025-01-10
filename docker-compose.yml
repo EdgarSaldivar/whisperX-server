@@ -18,6 +18,8 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - NVIDIA_REQUIRE_CUDA=cuda>=12.2
       - CUDA_VISIBLE_DEVICES=GPU-b5864669-d804-c2f5-e94b-60885d9012af
+      - DIARIZATION_MIN_SPEAKERS=1
+      - DIARIZATION_MAX_SPEAKERS=5
     runtime: nvidia
     restart: unless-stopped
     depends_on:

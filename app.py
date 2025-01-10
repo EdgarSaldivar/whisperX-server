@@ -126,15 +126,33 @@ def transcribe() -> Dict[str, Any]:
                     return_char_alignments=False
                 )
                 
-                # Diarize
+                # Get speaker count configuration
+                min_speakers = int(os.getenv('DIARIZATION_MIN_SPEAKERS', 1))
+                max_speakers = int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5))
+                
+                app.logger.info(f"Configuring diarization with {min_speakers}-{max_speakers} speakers")
+                
+                # Diarize with speaker count estimation
                 diarize_model = whisperx.DiarizationPipeline(
                     use_auth_token=hf_token,
                     device=device
                 )
-                diarize_segments = diarize_model(temp_path)
+                diarize_segments = diarize_model(
+                    temp_path,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers
+                )
                 
-                # Assign speakers
+                # Assign speakers with detailed logging
+                app.logger.info("Assigning speakers to words...")
                 result = whisperx.assign_word_speakers(diarize_segments, result)
+                
+                # Log speaker distribution
+                speaker_counts = {}
+                for segment in result['segments']:
+                    speaker = segment.get('speaker', 'UNKNOWN')
+                    speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
+                app.logger.info(f"Speaker distribution: {speaker_counts}")
                 
                 app.logger.info("Diarization completed successfully")
                 
