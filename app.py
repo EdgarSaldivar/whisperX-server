@@ -72,6 +72,54 @@ def allowed_file(filename: str) -> bool:
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def format_segment_text(segment: dict) -> str:
+    """Format a single segment into a readable string."""
+    # Clean up the text by removing extra spaces and normalizing whitespace
+    text = segment['text'].strip()
+    if not text:
+        return ""
+        
+    # Format with speaker in parentheses
+    return f"(Speaker {segment['speaker']}) {text}"
+
+def merge_sequential_speaker_segments(segments: list) -> list:
+    """Merge consecutive segments from the same speaker into single segments."""
+    if not segments:
+        return []
+        
+    merged = []
+    current = segments[0].copy()
+    
+    for segment in segments[1:]:
+        if (segment['speaker'] == current['speaker'] and 
+            segment['start'] - current['end'] < 1.0):  # 1 second threshold
+            # Merge the segments
+            current['end'] = segment['end']
+            current['text'] = f"{current['text'].strip()} {segment['text'].strip()}"
+        else:
+            merged.append(current)
+            current = segment.copy()
+    
+    merged.append(current)
+    return merged
+
+def format_response(result: dict) -> dict:
+    """Format the transcription result into a readable response."""
+    # Merge sequential segments from the same speaker
+    processed_segments = merge_sequential_speaker_segments(result['segments'])
+    
+    # Format each segment
+    formatted_segments = [format_segment_text(segment) for segment in processed_segments]
+    
+    # Join with newlines
+    transcription = '\n'.join(formatted_segments)
+    
+    return {
+        'transcription': transcription,
+        'language': result.get('language', 'en'),
+        'segments': processed_segments
+    }
+
 @app.route('/transcribe', methods=['POST'])
 def transcribe() -> Dict[str, Any]:
     # Check if file is present
@@ -221,24 +269,20 @@ def transcribe() -> Dict[str, Any]:
             for segment in result['segments']
         )
 
-        response = {
-            'transcription': text,
-            'language': result.get('language', 'en'),
-            'segments': result['segments']
-        }
+        response = format_response(result)
 
         # Store in Qdrant
         try:
-            embedding = embedder.encode(text)
+            embedding = embedder.encode(response['transcription'])
             qdrant.upsert(
                 collection_name='transcriptions',
                 points=[{
                     'id': int(datetime.datetime.now().timestamp() * 1000),
                     'vector': embedding.tolist(),
                     'payload': {
-                        'text': text,
+                        'text': response['transcription'],
                         'language': response['language'],
-                        'segments': processed_segments,
+                        'segments': response['segments'],
                         'filename': filename,
                         'timestamp': datetime.datetime.now().isoformat()
                     }
@@ -247,20 +291,11 @@ def transcribe() -> Dict[str, Any]:
             app.logger.info("Successfully stored in Qdrant")
         except Exception as e:
             app.logger.error(f"Qdrant storage failed: {str(e)}")
-            # Continue without failing the request
-
-        # Clean up
-        os.remove(temp_path)
         
         return jsonify(response)
 
     except Exception as e:
-        app.logger.error(f"Error processing segments: {str(e)}")
-        return jsonify({'error': f'Failed to process segments: {str(e)}'}), 500
-
-    except Exception as e:
         app.logger.error(f"Unexpected error: {str(e)}")
-        # Ensure temp file is cleaned up even if processing fails
         if os.path.exists(temp_path):
             os.remove(temp_path)
         return jsonify({'error': str(e)}), 500
