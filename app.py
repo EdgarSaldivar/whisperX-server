@@ -101,132 +101,51 @@ def transcribe() -> Dict[str, Any]:
         
         # Handle WhisperX response format with diarization
         if isinstance(result, dict) and 'segments' in result:
-            # Perform diarization with authentication
+            # Perform diarization with WhisperX pipeline
             try:
-                from huggingface_hub import login
-                # Try to get HF_TOKEN from .env.local first, then fallback to .env
-                hf_token = None
-                try:
-                    from dotenv import load_dotenv
-                    load_dotenv('.env.local')
-                    hf_token = os.getenv('HF_TOKEN')
-                except:
-                    pass
-                
+                hf_token = os.getenv('HF_TOKEN')
                 if not hf_token:
-                    hf_token = os.getenv('HF_TOKEN')
+                    raise ValueError("HF_TOKEN not found in environment variables")
+                    
+                app.logger.info("Initializing WhisperX diarization pipeline...")
                 
-                if not hf_token:
-                    raise ValueError("HF_TOKEN not found in .env or .env.local")
+                # Transcribe with WhisperX
+                result = whisperx.transcribe(
+                    audio=temp_path,
+                    model=model,
+                    device=device,
+                    batch_size=16,
+                    compute_type="float16"
+                )
                 
-                login(token=hf_token)
-                from pyannote.audio import Pipeline
-                try:
-                    app.logger.info("Initializing diarization pipeline...")
-                    app.logger.info("Using HF_TOKEN: %s", "****" + hf_token[-4:] if hf_token else "None")
-                    
-                    # Check if model is cached locally
-                    from huggingface_hub import snapshot_download
-                    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-                    model_path = os.path.join(cache_dir, "models--pyannote--speaker-diarization-3.1.1")
-                    
-                    if os.path.exists(model_path):
-                        app.logger.info("Using cached model at: %s", model_path)
-                        try:
-                            diarize_pipeline = Pipeline.from_pretrained(
-                                model_path,
-                                use_auth_token=hf_token
-                            )
-                        except Exception as e:
-                            app.logger.error(f"Failed to load cached model: {str(e)}")
-                            app.logger.info("Attempting fresh download...")
-                            raise  # Will trigger the download retry logic
-                    else:
-                        app.logger.info("Downloading model from Hugging Face Hub...")
-                        from huggingface_hub import HfApi
-                        api = HfApi()
-                        
-                        # Verify token permissions
-                        try:
-                            api.whoami(token=hf_token)
-                            app.logger.info("HF token permissions verified")
-                        except Exception as e:
-                            app.logger.error(f"HF token verification failed: {str(e)}")
-                            raise ValueError("Invalid HF_TOKEN permissions")
-                        
-                        # Download with retries
-                        max_retries = 3
-                        retry_delay = 5
-                        for attempt in range(max_retries):
-                            try:
-                                diarize_pipeline = Pipeline.from_pretrained(
-                                    "pyannote/speaker-diarization-3.1",
-                                    use_auth_token=hf_token
-                                )
-                                break
-                            except Exception as e:
-                                if attempt == max_retries - 1:
-                                    app.logger.error(f"Failed to download model after {max_retries} attempts: {str(e)}")
-                                    raise
-                                app.logger.warning(f"Model download attempt {attempt + 1} failed, retrying in {retry_delay} seconds...")
-                                time.sleep(retry_delay)
-                    
-                    if diarize_pipeline is None:
-                        raise ValueError("Failed to initialize diarization pipeline")
-                        
-                    app.logger.info("Pipeline initialized successfully: %s", type(diarize_pipeline))
-                    app.logger.info("Pipeline device: %s", diarize_pipeline.device)
-                except Exception as e:
-                    app.logger.error("Pipeline initialization failed: %s", str(e))
-                    app.logger.error("Please verify your HF_TOKEN and ensure you have accepted the model license at: https://huggingface.co/pyannote/speaker-diarization-3.1")
-                    raise
-                # Get audio data for diarization
-                import librosa
-                audio, sr = librosa.load(temp_path, sr=None)
-                diarize_segments = diarize_pipeline({
-                    "waveform": torch.from_numpy(audio).unsqueeze(0),
-                    "sample_rate": sr
-                })
+                # Align output
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=result["language"],
+                    device=device
+                )
+                result = whisperx.align(
+                    result["segments"],
+                    model_a,
+                    metadata,
+                    temp_path,
+                    device,
+                    return_char_alignments=False
+                )
                 
-                # Convert diarization results to list of (start, end, speaker) tuples
-                try:
-                    app.logger.info("Diarization pipeline output type: %s", type(diarize_segments))
-                    app.logger.info("Diarization pipeline output sample: %s", str(diarize_segments)[:200])  # Log first 200 chars
-                    
-                    if hasattr(diarize_segments, 'for_json'):
-                        # Handle newer pyannote.audio format
-                        json_data = diarize_segments.for_json()
-                        app.logger.info("Diarization JSON structure: %s", str(json_data)[:200])
-                        diarize_segments = [
-                            (segment['start'], segment['end'], segment['speaker'])
-                            for segment in json_data['content']
-                        ]
-                    elif isinstance(diarize_segments, dict):
-                        # Handle dictionary format
-                        diarize_segments = [
-                            (segment['start'], segment['end'], segment['speaker'])
-                            for segment in diarize_segments.get('content', [])
-                        ]
-                    else:
-                        # Fallback to direct iteration if format is unknown
-                        diarize_segments = list(diarize_segments)
-                        app.logger.info("Raw diarization segments: %s", str(diarize_segments)[:200])
-                        
-                        # Try to extract start, end, speaker from whatever format we have
-                        try:
-                            diarize_segments = [
-                                (getattr(seg, 'start', None) or seg[0],
-                                 getattr(seg, 'end', None) or seg[1],
-                                 getattr(seg, 'speaker', None) or seg[2])
-                                for seg in diarize_segments
-                            ]
-                        except Exception as e:
-                            app.logger.error("Failed to parse diarization segments: %s", str(e))
-                            raise ValueError("Unsupported diarization format")
-                            
-                except Exception as e:
-                    app.logger.error("Diarization format conversion failed: %s", str(e))
-                    raise
+                # Diarize
+                diarize_model = whisperx.DiarizationPipeline(
+                    use_auth_token=hf_token,
+                    device=device
+                )
+                diarize_segments = diarize_model(temp_path)
+                
+                # Assign speakers
+                result = whisperx.assign_word_speakers(diarize_segments, result)
+                
+                app.logger.info("Diarization completed successfully")
+                
+                # Use the WhisperX assigned speaker segments
+                diarize_segments = result['segments']
             except Exception as e:
                 app.logger.error(f"Diarization failed: {str(e)}")
                 diarize_segments = result['segments']
