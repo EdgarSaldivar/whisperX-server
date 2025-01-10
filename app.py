@@ -132,16 +132,44 @@ def transcribe() -> Dict[str, Any]:
                     
                     if os.path.exists(model_path):
                         app.logger.info("Using cached model at: %s", model_path)
-                        diarize_pipeline = Pipeline.from_pretrained(
-                            model_path,
-                            hf_token
-                        )
+                        try:
+                            diarize_pipeline = Pipeline.from_pretrained(
+                                model_path,
+                                use_auth_token=hf_token
+                            )
+                        except Exception as e:
+                            app.logger.error(f"Failed to load cached model: {str(e)}")
+                            app.logger.info("Attempting fresh download...")
+                            raise  # Will trigger the download retry logic
                     else:
                         app.logger.info("Downloading model from Hugging Face Hub...")
-                        diarize_pipeline = Pipeline.from_pretrained(
-                            "pyannote/speaker-diarization-3.1.1",
-                            hf_token
-                        )
+                        from huggingface_hub import HfApi
+                        api = HfApi()
+                        
+                        # Verify token permissions
+                        try:
+                            api.whoami(token=hf_token)
+                            app.logger.info("HF token permissions verified")
+                        except Exception as e:
+                            app.logger.error(f"HF token verification failed: {str(e)}")
+                            raise ValueError("Invalid HF_TOKEN permissions")
+                        
+                        # Download with retries
+                        max_retries = 3
+                        retry_delay = 5
+                        for attempt in range(max_retries):
+                            try:
+                                diarize_pipeline = Pipeline.from_pretrained(
+                                    "pyannote/speaker-diarization-3.1",
+                                    use_auth_token=hf_token
+                                )
+                                break
+                            except Exception as e:
+                                if attempt == max_retries - 1:
+                                    app.logger.error(f"Failed to download model after {max_retries} attempts: {str(e)}")
+                                    raise
+                                app.logger.warning(f"Model download attempt {attempt + 1} failed, retrying in {retry_delay} seconds...")
+                                time.sleep(retry_delay)
                     
                     if diarize_pipeline is None:
                         raise ValueError("Failed to initialize diarization pipeline")
