@@ -91,193 +91,138 @@ def transcribe() -> Dict[str, Any]:
         return jsonify({'error': 'File too large'}), 413
     
     try:
-        # Secure filename and process
+        # Secure filename and save
         filename = secure_filename(file.filename)
         temp_path = f"/tmp/{filename}"
         file.save(temp_path)
         
-        # Transcribe audio
-        result = model.transcribe(temp_path)
+        app.logger.info(f"Starting transcription for file: {filename}")
         
-        # Handle WhisperX response format with diarization
-        if isinstance(result, dict) and 'segments' in result:
-            # Perform diarization with WhisperX pipeline
-            try:
-                hf_token = os.getenv('HF_TOKEN')
-                if not hf_token:
-                    raise ValueError("HF_TOKEN not found in environment variables")
-                    
-                app.logger.info("Initializing WhisperX diarization pipeline...")
-                
-                # Transcribe with WhisperX
-                result = model.transcribe(temp_path, batch_size=16)
-                
-                # Align output
-                align_model, metadata = whisperx.load_align_model(
-                    language_code=result["language"],
-                    device=device
-                )
-                result = whisperx.align(
-                    result["segments"],
-                    align_model,
-                    metadata,
-                    temp_path,
-                    device,
-                    return_char_alignments=False
-                )
-                
-                # Get speaker count configuration
-                min_speakers = int(os.getenv('DIARIZATION_MIN_SPEAKERS', 1))
-                max_speakers = int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5))
-                
-                app.logger.info(f"Configuring diarization with {min_speakers}-{max_speakers} speakers")
-                
-                # Diarize with speaker count estimation
-                diarize_model = whisperx.DiarizationPipeline(
-                    use_auth_token=hf_token,
-                    device=device
-                )
-                diarize_segments = diarize_model(
-                    temp_path,
-                    min_speakers=min_speakers,
-                    max_speakers=max_speakers
-                )
-                
-                try:
-                    # Suppress PyTorch warnings
-                    import warnings
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        
-                        # Assign speakers with detailed logging
-                        app.logger.info("Assigning speakers to words...")
-                        result = whisperx.assign_word_speakers(diarize_segments, result)
-                        
-                        # Ensure all segments have a speaker
-                        for segment in result['segments']:
-                            if 'speaker' not in segment:
-                                segment['speaker'] = 'UNKNOWN'
-                                app.logger.warning(f"Added default speaker to segment: {segment}")
-                        
-                        # Log detailed speaker distribution
-                        speaker_counts = {}
-                        for segment in result['segments']:
-                            speaker = segment.get('speaker', 'UNKNOWN')
-                            speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
-                            app.logger.debug(f"Segment: {segment['start']}-{segment['end']}s, Speaker: {speaker}, Text: {segment['text']}")
-                        
-                        app.logger.info(f"Speaker distribution: {speaker_counts}")
-                except Exception as e:
-                    app.logger.error(f"Speaker assignment failed: {str(e)}")
-                    # Fallback to single speaker
-                    for segment in result['segments']:
-                        segment['speaker'] = 'SPEAKER_00'
-                    app.logger.info("Falling back to single speaker mode")
-                except Exception as e:
-                    app.logger.error(f"Speaker assignment failed: {str(e)}")
-                    # Fallback to single speaker
-                    for segment in result['segments']:
-                        segment['speaker'] = 'SPEAKER_00'
-                    app.logger.info("Falling back to single speaker mode")
-                
-                app.logger.info("Diarization completed successfully")
-                
-                # Clean up models
-                del align_model
-                del diarize_model
-                import gc
-                gc.collect()
-                if device == 'cuda':
-                    torch.cuda.empty_cache()
-                
-                # Use the WhisperX assigned speaker segments
-                diarize_segments = result['segments']
-            except Exception as e:
-                app.logger.error(f"Diarization failed: {str(e)}")
-                diarize_segments = result['segments']
-                for segment in diarize_segments:
-                    segment['speaker'] = 'SPEAKER_00'
+        # Initial transcription
+        try:
+            result = model.transcribe(temp_path, batch_size=16)
+            app.logger.info(f"Initial transcription complete. Language detected: {result.get('language', 'unknown')}")
             
-            # Combine text with speaker information
-            try:
-                if not result.get('segments'):
-                    raise ValueError("No transcription segments available")
-                    
-                text = ' '.join(
-                    f"[Speaker {segment.get('speaker', 'UNKNOWN')}] {segment['text'].strip()}"
-                    for segment in result['segments']
-                )
-            except KeyError as e:
-                app.logger.error(f"Missing required field in segment: {str(e)}")
-                app.logger.error(f"Problematic segment: {segment}")
-                raise ValueError(f"Invalid segment format: missing {str(e)}")
-            except Exception as e:
-                app.logger.error(f"Error processing segments: {str(e)}")
-                raise ValueError("Failed to process transcription segments")
+            if not isinstance(result, dict):
+                raise ValueError(f"Expected dict result, got {type(result)}")
+            if 'segments' not in result:
+                raise ValueError(f"No segments in result. Keys present: {result.keys()}")
+        except Exception as e:
+            app.logger.error(f"Transcription failed: {str(e)}")
+            return jsonify({'error': f'Transcription failed: {str(e)}'}), 500
+
+        # Alignment
+        try:
+            align_model, metadata = whisperx.load_align_model(
+                language_code=result["language"],
+                device=device
+            )
+            result = whisperx.align(
+                result["segments"],
+                align_model,
+                metadata,
+                temp_path,
+                device,
+                return_char_alignments=False
+            )
+            app.logger.info("Alignment completed successfully")
+        except Exception as e:
+            app.logger.error(f"Alignment failed: {str(e)}")
+            # Continue with unaligned result rather than failing
+            pass
+
+        # Diarization
+        try:
+            hf_token = os.getenv('HF_TOKEN')
+            if not hf_token:
+                raise ValueError("HF_TOKEN not found in environment variables")
+
+            min_speakers = int(os.getenv('DIARIZATION_MIN_SPEAKERS', 1))
+            max_speakers = int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5))
             
-            # Align diarization results with transcription segments
+            diarize_model = whisperx.DiarizationPipeline(
+                use_auth_token=hf_token,
+                device=device
+            )
+            
+            diarize_segments = diarize_model(
+                temp_path,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers
+            )
+            
+            # Assign speakers
+            result = whisperx.assign_word_speakers(diarize_segments, result)
+            app.logger.info("Diarization completed successfully")
+            
+        except Exception as e:
+            app.logger.error(f"Diarization failed: {str(e)}")
+            # Fallback to single speaker
             for segment in result['segments']:
-                # Find overlapping speakers
-                speakers = []
-                for turn in diarize_segments:
-                    try:
-                        turn_start = turn[0] if isinstance(turn, (list, tuple)) else turn['start']
-                        turn_end = turn[1] if isinstance(turn, (list, tuple)) else turn['end']
-                        speaker = turn[2] if isinstance(turn, (list, tuple)) else turn['speaker']
-                        
-                        if turn_start <= segment['end'] and turn_end >= segment['start']:
-                            speakers.append(speaker)
-                    except Exception as e:
-                        app.logger.warning(f"Failed to process diarization turn: {str(e)}")
-                        continue
-                
-                # Assign most common speaker
-                if speakers:
-                    from collections import Counter
-                    segment['speaker'] = Counter(speakers).most_common(1)[0][0]
-                else:
-                    segment['speaker'] = 'SPEAKER_00'
-            
-            # Validate and create simplified response
-            if not result.get('segments'):
-                raise ValueError("No transcription segments found")
-                
+                segment['speaker'] = 'SPEAKER_00'
+            app.logger.info("Using fallback single speaker mode")
+
+        # Process segments and create response
+        try:
+            # Ensure all segments have required fields
+            processed_segments = []
+            for segment in result['segments']:
+                processed_segment = {
+                    'start': segment.get('start', 0),
+                    'end': segment.get('end', 0),
+                    'text': segment.get('text', '').strip(),
+                    'speaker': segment.get('speaker', 'SPEAKER_00')
+                }
+                processed_segments.append(processed_segment)
+
+            # Create full text with speaker annotations
+            text = ' '.join(
+                f"[Speaker {seg['speaker']}] {seg['text']}"
+                for seg in processed_segments
+            )
+
             response = {
                 'transcription': text,
-                'language': result.get('language', 'en')
+                'language': result.get('language', 'en'),
+                'segments': processed_segments
             }
-            
-            # Generate embedding for the full transcription
-            embedding = embedder.encode(text)
-            
+
             # Store in Qdrant
-            qdrant.upsert(
-                collection_name='transcriptions',
-                points=[
-                    {
+            try:
+                embedding = embedder.encode(text)
+                qdrant.upsert(
+                    collection_name='transcriptions',
+                    points=[{
                         'id': int(datetime.datetime.now().timestamp() * 1000),
                         'vector': embedding.tolist(),
                         'payload': {
                             'text': text,
                             'language': response['language'],
-                            'segments': response['segments'],
-                            'filename': secure_filename(file.filename),
+                            'segments': processed_segments,
+                            'filename': filename,
                             'timestamp': datetime.datetime.now().isoformat()
                         }
-                    }
-                ]
-            )
-            
+                    }]
+                )
+                app.logger.info("Successfully stored in Qdrant")
+            except Exception as e:
+                app.logger.error(f"Qdrant storage failed: {str(e)}")
+                # Continue without failing the request
+
             # Clean up
             os.remove(temp_path)
             
             return jsonify(response)
-        else:
-            # Clean up
-            os.remove(temp_path)
-            return jsonify({'error': 'Invalid transcription result format'}), 500
-        
+
+        except Exception as e:
+            app.logger.error(f"Error processing segments: {str(e)}")
+            return jsonify({'error': f'Failed to process segments: {str(e)}'}), 500
+
     except Exception as e:
+        app.logger.error(f"Unexpected error: {str(e)}")
+        # Ensure temp file is cleaned up even if processing fails
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
