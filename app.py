@@ -187,6 +187,9 @@ def transcribe() -> Dict[str, Any]:
             
             # Combine text with speaker information
             try:
+                if not result.get('segments'):
+                    raise ValueError("No transcription segments available")
+                    
                 text = ' '.join(
                     f"[Speaker {segment.get('speaker', 'UNKNOWN')}] {segment['text'].strip()}"
                     for segment in result['segments']
@@ -195,6 +198,9 @@ def transcribe() -> Dict[str, Any]:
                 app.logger.error(f"Missing required field in segment: {str(e)}")
                 app.logger.error(f"Problematic segment: {segment}")
                 raise ValueError(f"Invalid segment format: missing {str(e)}")
+            except Exception as e:
+                app.logger.error(f"Error processing segments: {str(e)}")
+                raise ValueError("Failed to process transcription segments")
             
             # Align diarization results with transcription segments
             for segment in result['segments']:
@@ -219,7 +225,10 @@ def transcribe() -> Dict[str, Any]:
                 else:
                     segment['speaker'] = 'SPEAKER_00'
             
-            # Simplified response with only final transcription
+            # Validate and create simplified response
+            if not result.get('segments'):
+                raise ValueError("No transcription segments found")
+                
             response = {
                 'transcription': text,
                 'language': result.get('language', 'en')
