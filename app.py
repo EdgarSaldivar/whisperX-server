@@ -152,21 +152,27 @@ def transcribe() -> Dict[str, Any]:
                     app.logger.info("Assigning speakers to words...")
                     try:
                         result = whisperx.assign_word_speakers(diarize_segments, result)
-                        
-                        # Ensure all segments have a speaker
+                    except Exception as e:
+                        app.logger.error(f"Speaker assignment failed: {str(e)}")
+                        # Fallback to single speaker
                         for segment in result['segments']:
-                            if 'speaker' not in segment:
-                                segment['speaker'] = 'UNKNOWN'
-                                app.logger.warning(f"Added default speaker to segment: {segment}")
-                        
-                        # Log detailed speaker distribution
-                        speaker_counts = {}
-                        for segment in result['segments']:
-                            speaker = segment.get('speaker', 'UNKNOWN')
-                            speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
-                            app.logger.debug(f"Segment: {segment['start']}-{segment['end']}s, Speaker: {speaker}, Text: {segment['text']}")
-                        
-                        app.logger.info(f"Speaker distribution: {speaker_counts}")
+                            segment['speaker'] = 'SPEAKER_00'
+                        app.logger.info("Falling back to single speaker mode")
+                    
+                    # Ensure all segments have a speaker
+                    for segment in result['segments']:
+                        if 'speaker' not in segment:
+                            segment['speaker'] = 'UNKNOWN'
+                            app.logger.warning(f"Added default speaker to segment: {segment}")
+                    
+                    # Log detailed speaker distribution
+                    speaker_counts = {}
+                    for segment in result['segments']:
+                        speaker = segment.get('speaker', 'UNKNOWN')
+                        speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
+                        app.logger.debug(f"Segment: {segment['start']}-{segment['end']}s, Speaker: {speaker}, Text: {segment['text']}")
+                    
+                    app.logger.info(f"Speaker distribution: {speaker_counts}")
                 except Exception as e:
                     app.logger.error(f"Speaker assignment failed: {str(e)}")
                     # Fallback to single speaker
