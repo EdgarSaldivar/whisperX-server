@@ -20,6 +20,9 @@ services:
       - CUDA_VISIBLE_DEVICES=GPU-b5864669-d804-c2f5-e94b-60885d9012af
       - DIARIZATION_MIN_SPEAKERS=1
       - DIARIZATION_MAX_SPEAKERS=5
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32
+      - TRANSFORMERS_OFFLINE=1  # Prevents model download warnings
+      - PYTHONWARNINGS=ignore::UserWarning,ignore::FutureWarning
     runtime: nvidia
     restart: unless-stopped
     depends_on:

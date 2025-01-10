@@ -9,11 +9,16 @@ from typing import Dict, Any
 import torch
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
-
-# Configure TF32 and suppress warnings
 import warnings
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
+
+# Suppress FutureWarning for _register_pytree_node
+warnings.filterwarnings('ignore', category=FutureWarning, 
+                       module='transformers.utils.generic')
+
+# Configure PyTorch settings
+torch.set_float32_matmul_precision('high')
+if torch.cuda.is_available():
+    # Enable TF32 explicitly as recommended
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
@@ -21,6 +26,9 @@ with warnings.catch_warnings():
 # Initialize Qdrant client
 qdrant = QdrantClient(os.getenv('QDRANT_URL', 'http://localhost:6333'))
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Initialize Flask app
+app = Flask(__name__)
 
 # Initialize Qdrant collection with retries
 max_retries = 5
@@ -48,15 +56,12 @@ for attempt in range(max_retries):
         app.logger.warning(f"Qdrant initialization attempt {attempt + 1} failed, retrying in {retry_delay} seconds...")
         time.sleep(retry_delay)
 
-app = Flask(__name__)
-
 # Configuration
 MODEL_NAME = os.getenv('WHISPER_MODEL', 'large-v2')
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 # Verify GPU availability
-import torch
 if torch.cuda.is_available():
     app.logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
     app.logger.info(f"CUDA version: {torch.version.cuda}")
@@ -74,19 +79,16 @@ def allowed_file(filename: str) -> bool:
 
 def format_segment_text(segment: dict) -> str:
     """Format a single segment into a readable string."""
-    # Clean up the text by removing extra spaces and normalizing whitespace
     text = segment['text'].strip()
     if not text:
         return ""
-        
-    # Format with speaker in parentheses
     return f"(Speaker {segment['speaker']}) {text}"
 
 def merge_sequential_speaker_segments(segments: list) -> list:
     """Merge consecutive segments from the same speaker into single segments."""
     if not segments:
         return []
-        
+    
     merged = []
     current = segments[0].copy()
     
@@ -145,7 +147,7 @@ def transcribe() -> Dict[str, Any]:
         
         app.logger.info(f"Starting enhanced transcription for file: {filename}")
         
-        # Step 1: Initial transcription with larger batch size for better context
+        # Step 1: Initial transcription with larger batch size
         result = model.transcribe(temp_path, batch_size=32)
         app.logger.info(f"Initial transcription complete. Language: {result.get('language', 'unknown')}")
 
@@ -168,48 +170,29 @@ def transcribe() -> Dict[str, Any]:
             app.logger.error(f"Alignment failed: {str(e)}")
             pass
 
-        # Step 3: Enhanced diarization with improved parameters
+        # Step 3: Enhanced diarization
         try:
             hf_token = os.getenv('HF_TOKEN')
             if not hf_token:
                 raise ValueError("HF_TOKEN not found")
 
-            # Initialize diarization pipeline with enhanced settings
+            # Initialize diarization pipeline with supported parameters
             diarize_model = whisperx.DiarizationPipeline(
                 use_auth_token=hf_token,
-                device=device,
-                sampling_rate=16000,  # Explicitly set sampling rate
-                pipeline_config={
-                    "vad": {
-                        "min_speech_duration_ms": 250,  # Reduced from default for better separation
-                        "min_silence_duration_ms": 100,  # Reduced to detect quick speaker changes
-                        "speech_pad_ms": 30  # Added small padding
-                    },
-                    "speaker_detection": {
-                        "min_speakers": int(os.getenv('DIARIZATION_MIN_SPEAKERS', 2)),  # Default to expecting at least 2 speakers
-                        "max_speakers": int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5)),
-                        "audio_duration_threshold": 0.5,  # Minimum duration for speaker segment
-                        "speech_activity_threshold": 0.4  # Lower threshold for speech detection
-                    }
-                }
+                device=device
             )
 
-            # Run diarization with enhanced parameters
+            # Run diarization with supported parameters
             diarize_segments = diarize_model(
                 temp_path,
                 min_speakers=int(os.getenv('DIARIZATION_MIN_SPEAKERS', 2)),
-                max_speakers=int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5)),
-                silence_threshold=0.4,  # More sensitive silence detection
-                segment_length=10,  # Shorter segments for better speaker detection
-                step_size=3  # Smaller step size for more precise segmentation
+                max_speakers=int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5))
             )
             
             # Step 4: Improved speaker assignment
             result = whisperx.assign_word_speakers(
                 diarize_segments, 
-                result,
-                speaker_embeddings=True,  # Enable speaker embeddings
-                min_speaker_duration=0.5  # Minimum duration for speaker segments
+                result
             )
 
             # Post-process speaker assignments
@@ -223,52 +206,23 @@ def transcribe() -> Dict[str, Any]:
                     speaker_segments[speaker] = []
                 speaker_segments[speaker].append(segment)
 
-            # Merge adjacent segments from same speaker
-            processed_segments = []
-            current_segment = None
-            
-            for segment in result['segments']:
-                if current_segment is None:
-                    current_segment = segment.copy()
-                    continue
-                    
-                if (segment['speaker'] == current_segment['speaker'] and 
-                    segment['start'] - current_segment['end'] < 0.5):  # 500ms threshold
-                    # Merge segments
-                    current_segment['end'] = segment['end']
-                    current_segment['text'] += ' ' + segment['text']
-                else:
-                    processed_segments.append(current_segment)
-                    current_segment = segment.copy()
-            
-            if current_segment:
-                processed_segments.append(current_segment)
-
-            # Update result with processed segments
-            result['segments'] = processed_segments
-
-            app.logger.info(f"Diarization completed. Detected {len(speaker_segments)} speakers")
+            app.logger.info(f"Diarization completed successfully. Found {len(speaker_segments)} speakers")
             
         except Exception as e:
             app.logger.error(f"Diarization failed: {str(e)}")
+            app.logger.exception("Detailed diarization error:")
             # Fallback to basic speaker separation
             for i, segment in enumerate(result['segments']):
-                # Simple heuristic: assign different speakers based on time gaps
                 if i > 0:
                     prev_segment = result['segments'][i-1]
-                    if segment['start'] - prev_segment['end'] > 1.0:  # 1 second gap
+                    if segment['start'] - prev_segment['end'] > 1.0:
                         segment['speaker'] = f'SPEAKER_{(int(prev_segment["speaker"].split("_")[1]) + 1) % 3:02d}'
                     else:
                         segment['speaker'] = prev_segment['speaker']
                 else:
                     segment['speaker'] = 'SPEAKER_00'
 
-        # Create response with processed segments
-        text = ' '.join(
-            f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
-            for segment in result['segments']
-        )
-
+        # Format and create response
         response = format_response(result)
 
         # Store in Qdrant
@@ -291,6 +245,9 @@ def transcribe() -> Dict[str, Any]:
             app.logger.info("Successfully stored in Qdrant")
         except Exception as e:
             app.logger.error(f"Qdrant storage failed: {str(e)}")
+
+        # Clean up
+        os.remove(temp_path)
         
         return jsonify(response)
 
