@@ -145,14 +145,27 @@ def transcribe() -> Dict[str, Any]:
                 
                 # Assign speakers with detailed logging
                 app.logger.info("Assigning speakers to words...")
-                result = whisperx.assign_word_speakers(diarize_segments, result)
-                
-                # Log speaker distribution
-                speaker_counts = {}
-                for segment in result['segments']:
-                    speaker = segment.get('speaker', 'UNKNOWN')
-                    speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
-                app.logger.info(f"Speaker distribution: {speaker_counts}")
+                try:
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                    
+                    # Ensure all segments have a speaker
+                    for segment in result['segments']:
+                        if 'speaker' not in segment:
+                            segment['speaker'] = 'UNKNOWN'
+                            app.logger.warning(f"Added default speaker to segment: {segment}")
+                    
+                    # Log speaker distribution
+                    speaker_counts = {}
+                    for segment in result['segments']:
+                        speaker = segment.get('speaker', 'UNKNOWN')
+                        speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
+                    app.logger.info(f"Speaker distribution: {speaker_counts}")
+                except Exception as e:
+                    app.logger.error(f"Speaker assignment failed: {str(e)}")
+                    # Fallback to single speaker
+                    for segment in result['segments']:
+                        segment['speaker'] = 'SPEAKER_00'
+                    app.logger.info("Falling back to single speaker mode")
                 
                 app.logger.info("Diarization completed successfully")
                 
@@ -173,8 +186,15 @@ def transcribe() -> Dict[str, Any]:
                     segment['speaker'] = 'SPEAKER_00'
             
             # Combine text with speaker information
-            text = ' '.join(f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
-                          for segment in result['segments'])
+            try:
+                text = ' '.join(
+                    f"[Speaker {segment.get('speaker', 'UNKNOWN')}] {segment['text'].strip()}"
+                    for segment in result['segments']
+                )
+            except KeyError as e:
+                app.logger.error(f"Missing required field in segment: {str(e)}")
+                app.logger.error(f"Problematic segment: {segment}")
+                raise ValueError(f"Invalid segment format: missing {str(e)}")
             
             # Align diarization results with transcription segments
             for segment in result['segments']:
