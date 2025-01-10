@@ -220,10 +220,10 @@ def transcribe() -> Dict[str, Any]:
                 else:
                     segment['speaker'] = 'SPEAKER_00'
             
+            # Simplified response with only final transcription
             response = {
                 'transcription': text,
-                'language': result.get('language', 'en'),
-                'segments': diarize_segments
+                'language': result.get('language', 'en')
             }
             
             # Generate embedding for the full transcription
