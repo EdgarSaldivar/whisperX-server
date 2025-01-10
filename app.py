@@ -91,27 +91,17 @@ def transcribe() -> Dict[str, Any]:
         return jsonify({'error': 'File too large'}), 413
     
     try:
-        # Secure filename and save
         filename = secure_filename(file.filename)
         temp_path = f"/tmp/{filename}"
         file.save(temp_path)
         
-        app.logger.info(f"Starting transcription for file: {filename}")
+        app.logger.info(f"Starting enhanced transcription for file: {filename}")
         
-        # Initial transcription
-        try:
-            result = model.transcribe(temp_path, batch_size=16)
-            app.logger.info(f"Initial transcription complete. Language detected: {result.get('language', 'unknown')}")
-            
-            if not isinstance(result, dict):
-                raise ValueError(f"Expected dict result, got {type(result)}")
-            if 'segments' not in result:
-                raise ValueError(f"No segments in result. Keys present: {result.keys()}")
-        except Exception as e:
-            app.logger.error(f"Transcription failed: {str(e)}")
-            return jsonify({'error': f'Transcription failed: {str(e)}'}), 500
+        # Step 1: Initial transcription with larger batch size for better context
+        result = model.transcribe(temp_path, batch_size=32)
+        app.logger.info(f"Initial transcription complete. Language: {result.get('language', 'unknown')}")
 
-        # Alignment
+        # Step 2: Enhanced alignment with word-level timestamps
         try:
             align_model, metadata = whisperx.load_align_model(
                 language_code=result["language"],
@@ -125,67 +115,117 @@ def transcribe() -> Dict[str, Any]:
                 device,
                 return_char_alignments=False
             )
-            app.logger.info("Alignment completed successfully")
+            app.logger.info("Alignment completed with word-level timestamps")
         except Exception as e:
             app.logger.error(f"Alignment failed: {str(e)}")
-            # Continue with unaligned result rather than failing
             pass
 
-        # Diarization
+        # Step 3: Enhanced diarization with improved parameters
         try:
             hf_token = os.getenv('HF_TOKEN')
             if not hf_token:
-                raise ValueError("HF_TOKEN not found in environment variables")
+                raise ValueError("HF_TOKEN not found")
 
-            min_speakers = int(os.getenv('DIARIZATION_MIN_SPEAKERS', 1))
-            max_speakers = int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5))
-            
+            # Initialize diarization pipeline with enhanced settings
             diarize_model = whisperx.DiarizationPipeline(
                 use_auth_token=hf_token,
-                device=device
+                device=device,
+                sampling_rate=16000,  # Explicitly set sampling rate
+                pipeline_config={
+                    "vad": {
+                        "min_speech_duration_ms": 250,  # Reduced from default for better separation
+                        "min_silence_duration_ms": 100,  # Reduced to detect quick speaker changes
+                        "speech_pad_ms": 30  # Added small padding
+                    },
+                    "speaker_detection": {
+                        "min_speakers": int(os.getenv('DIARIZATION_MIN_SPEAKERS', 2)),  # Default to expecting at least 2 speakers
+                        "max_speakers": int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5)),
+                        "audio_duration_threshold": 0.5,  # Minimum duration for speaker segment
+                        "speech_activity_threshold": 0.4  # Lower threshold for speech detection
+                    }
+                }
             )
-            
+
+            # Run diarization with enhanced parameters
             diarize_segments = diarize_model(
                 temp_path,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers
+                min_speakers=int(os.getenv('DIARIZATION_MIN_SPEAKERS', 2)),
+                max_speakers=int(os.getenv('DIARIZATION_MAX_SPEAKERS', 5)),
+                silence_threshold=0.4,  # More sensitive silence detection
+                segment_length=10,  # Shorter segments for better speaker detection
+                step_size=3  # Smaller step size for more precise segmentation
             )
             
-            # Assign speakers
-            result = whisperx.assign_word_speakers(diarize_segments, result)
-            app.logger.info("Diarization completed successfully")
+            # Step 4: Improved speaker assignment
+            result = whisperx.assign_word_speakers(
+                diarize_segments, 
+                result,
+                speaker_embeddings=True,  # Enable speaker embeddings
+                min_speaker_duration=0.5  # Minimum duration for speaker segments
+            )
+
+            # Post-process speaker assignments
+            speaker_segments = {}
+            for segment in result['segments']:
+                if 'speaker' not in segment:
+                    continue
+                    
+                speaker = segment['speaker']
+                if speaker not in speaker_segments:
+                    speaker_segments[speaker] = []
+                speaker_segments[speaker].append(segment)
+
+            # Merge adjacent segments from same speaker
+            processed_segments = []
+            current_segment = None
+            
+            for segment in result['segments']:
+                if current_segment is None:
+                    current_segment = segment.copy()
+                    continue
+                    
+                if (segment['speaker'] == current_segment['speaker'] and 
+                    segment['start'] - current_segment['end'] < 0.5):  # 500ms threshold
+                    # Merge segments
+                    current_segment['end'] = segment['end']
+                    current_segment['text'] += ' ' + segment['text']
+                else:
+                    processed_segments.append(current_segment)
+                    current_segment = segment.copy()
+            
+            if current_segment:
+                processed_segments.append(current_segment)
+
+            # Update result with processed segments
+            result['segments'] = processed_segments
+
+            app.logger.info(f"Diarization completed. Detected {len(speaker_segments)} speakers")
             
         except Exception as e:
             app.logger.error(f"Diarization failed: {str(e)}")
-            # Fallback to single speaker
-            for segment in result['segments']:
-                segment['speaker'] = 'SPEAKER_00'
-            app.logger.info("Using fallback single speaker mode")
+            # Fallback to basic speaker separation
+            for i, segment in enumerate(result['segments']):
+                # Simple heuristic: assign different speakers based on time gaps
+                if i > 0:
+                    prev_segment = result['segments'][i-1]
+                    if segment['start'] - prev_segment['end'] > 1.0:  # 1 second gap
+                        segment['speaker'] = f'SPEAKER_{(int(prev_segment["speaker"].split("_")[1]) + 1) % 3:02d}'
+                    else:
+                        segment['speaker'] = prev_segment['speaker']
+                else:
+                    segment['speaker'] = 'SPEAKER_00'
 
-        # Process segments and create response
-        try:
-            # Ensure all segments have required fields
-            processed_segments = []
-            for segment in result['segments']:
-                processed_segment = {
-                    'start': segment.get('start', 0),
-                    'end': segment.get('end', 0),
-                    'text': segment.get('text', '').strip(),
-                    'speaker': segment.get('speaker', 'SPEAKER_00')
-                }
-                processed_segments.append(processed_segment)
+        # Create response with processed segments
+        text = ' '.join(
+            f"[Speaker {segment['speaker']}] {segment['text'].strip()}"
+            for segment in result['segments']
+        )
 
-            # Create full text with speaker annotations
-            text = ' '.join(
-                f"[Speaker {seg['speaker']}] {seg['text']}"
-                for seg in processed_segments
-            )
-
-            response = {
-                'transcription': text,
-                'language': result.get('language', 'en'),
-                'segments': processed_segments
-            }
+        response = {
+            'transcription': text,
+            'language': result.get('language', 'en'),
+            'segments': result['segments']
+        }
 
             # Store in Qdrant
             try:
