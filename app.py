@@ -110,22 +110,16 @@ def transcribe() -> Dict[str, Any]:
                 app.logger.info("Initializing WhisperX diarization pipeline...")
                 
                 # Transcribe with WhisperX
-                result = whisperx.transcribe(
-                    audio=temp_path,
-                    model=model,
-                    device=device,
-                    batch_size=16,
-                    compute_type="float16"
-                )
+                result = model.transcribe(temp_path, batch_size=16)
                 
                 # Align output
-                model_a, metadata = whisperx.load_align_model(
+                align_model, metadata = whisperx.load_align_model(
                     language_code=result["language"],
                     device=device
                 )
                 result = whisperx.align(
                     result["segments"],
-                    model_a,
+                    align_model,
                     metadata,
                     temp_path,
                     device,
@@ -143,6 +137,14 @@ def transcribe() -> Dict[str, Any]:
                 result = whisperx.assign_word_speakers(diarize_segments, result)
                 
                 app.logger.info("Diarization completed successfully")
+                
+                # Clean up models
+                del align_model
+                del diarize_model
+                import gc
+                gc.collect()
+                if device == 'cuda':
+                    torch.cuda.empty_cache()
                 
                 # Use the WhisperX assigned speaker segments
                 diarize_segments = result['segments']
