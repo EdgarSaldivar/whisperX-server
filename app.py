@@ -134,7 +134,7 @@ def transcribe() -> Dict[str, Any]:
                         app.logger.info("Using cached model at: %s", model_path)
                         diarize_pipeline = Pipeline.from_pretrained(
                             model_path,
-                            use_auth_token=hf_token
+                            hf_token
                         )
                     else:
                         app.logger.info("Downloading model from Hugging Face Hub...")
