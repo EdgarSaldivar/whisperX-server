@@ -34,4 +34,4 @@ ENV WHISPER_MODEL=large-v2
 EXPOSE 2990
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:2990", "--timeout", "300", "--graceful-timeout", "300", "--keepalive", "75", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:2990", "--timeout", "300", "--graceful-timeout", "300", "app:app"]
