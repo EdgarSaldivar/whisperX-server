@@ -29,6 +29,7 @@ embedder = SentenceTransformer('all-MiniLM-L6-v2')
 
 # Initialize Flask app
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 250 * 1024 * 1024  # 250MB
 
 # Initialize Qdrant collection with retries
 max_retries = 5
@@ -59,7 +60,7 @@ for attempt in range(max_retries):
 # Configuration
 MODEL_NAME = os.getenv('WHISPER_MODEL', 'large-v2')
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'flac'}
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+MAX_FILE_SIZE = 250 * 1024 * 1024  # 250MB
 
 # Verify GPU availability
 if torch.cuda.is_available():
