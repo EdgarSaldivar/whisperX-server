@@ -166,20 +166,29 @@ def transcribe() -> Dict[str, Any]:
                 return_char_alignments=False
             )
             app.logger.info("Alignment completed with word-level timestamps")
+        except ValueError as ve:
+            app.logger.error(f"Hugging Face token error: {str(ve)}")
+            raise
         except Exception as e:
-            app.logger.error(f"Alignment failed: {str(e)}")
+            app.logger.error(f"Diarization failed: {str(e)}")
+            app.logger.exception("Detailed diarization error:")
             pass
 
         # Step 3: Enhanced diarization
         try:
             hf_token = os.getenv('HF_TOKEN')
             if not hf_token:
-                raise ValueError("HF_TOKEN not found")
+                raise ValueError("HF_TOKEN environment variable not set")
+            
+            # Verify token format
+            if not hf_token.startswith('hf_'):
+                raise ValueError("Invalid HF_TOKEN format. Token should start with 'hf_'")
 
             # Initialize diarization pipeline with supported parameters
             diarize_model = whisperx.DiarizationPipeline(
                 use_auth_token=hf_token,
-                device=device
+                device=device,
+                cache_dir="/tmp/huggingface_cache"
             )
 
             # Run diarization with supported parameters
